@@ -1,6 +1,7 @@
 #include "AGV_Navigation.h"
 
-AGV_Navigation AGV;
+// Changed from AGV to AGVMCU
+AGV_Navigation AGVMCU;
 
 void AGV_Navigation::begin() {
     Serial.begin(115200);
