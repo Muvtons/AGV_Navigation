@@ -1,0 +1,431 @@
+#include "AGVMCU.h"
+
+// Global instance
+AGVMCU agv;
+
+AGVMCU::AGVMCU() 
+    : distanceThreshold(10.0), distanceTimeoutMs(10000), 
+      distanceBelowThreshold(false), isInObstacleRecovery(false),
+      totalSteps(0), currentStepIndex(0), currentX(-1), currentY(-1), 
+      currentDir('E'), currentState(STATE_IDLE),
+      lastSafeX(-1), lastSafeY(-1), lastSafeDir('E'),
+      blockedTargetX(-1), blockedTargetY(-1),
+      originalDestinationX(-1), originalDestinationY(-1),
+      lastAbortPress(0), lastStartPress(0), lastStopPress(0),
+      distanceBelowThresholdStart(0) {
+}
+
+void AGVMCU::begin(long baudRate) {
+    Serial.begin(baudRate);
+    
+    // Initialize motor control pins
+    pinMode(ENA, OUTPUT);
+    pinMode(IN1, OUTPUT);
+    pinMode(IN2, OUTPUT);
+    pinMode(ENB, OUTPUT);
+    pinMode(IN3, OUTPUT);
+    pinMode(IN4, OUTPUT);
+
+    // Initialize button pins with internal pull-up resistors
+    pinMode(START_BUTTON_PIN, INPUT_PULLUP);
+    pinMode(STOP_BUTTON_PIN, INPUT_PULLUP);
+    pinMode(ABORT_BUTTON_PIN, INPUT_PULLUP);
+
+    // Initialize all pins to safe state
+    stopMotors();
+    
+    Serial.println("AGV System Ready - AGVMCU Library");
+}
+
+void AGVMCU::update() {
+    handleButtons();
+    handleSerialInput();
+    
+    // Additional processing based on state
+    switch(currentState) {
+        case STATE_MOVING:
+            // Movement is handled in moveOneCell() - time based
+            break;
+        case STATE_OBSTACLE_AVOIDANCE:
+            // In obstacle recovery - waiting for QR confirmation
+            break;
+        default:
+            // Other states don't need continuous processing
+            break;
+    }
+}
+
+void AGVMCU::moveForward() {
+    digitalWrite(IN1, HIGH);
+    digitalWrite(IN2, LOW);
+    digitalWrite(IN3, HIGH);
+    digitalWrite(IN4, LOW);
+    analogWrite(ENA, 255);
+    analogWrite(ENB, 255);
+}
+
+void AGVMCU::moveBackward() {
+    digitalWrite(IN1, LOW);
+    digitalWrite(IN2, HIGH);
+    digitalWrite(IN3, LOW);
+    digitalWrite(IN4, HIGH);
+    analogWrite(ENA, 255);
+    analogWrite(ENB, 255);
+}
+
+void AGVMCU::stopMotors() {
+    digitalWrite(IN1, LOW);
+    digitalWrite(IN2, LOW);
+    digitalWrite(IN3, LOW);
+    digitalWrite(IN4, LOW);
+    analogWrite(ENA, 0);
+    analogWrite(ENB, 0);
+}
+
+void AGVMCU::rotateAngle(float degrees) {
+    if (degrees > 0) {
+        digitalWrite(IN1, HIGH);
+        digitalWrite(IN2, LOW);
+        digitalWrite(IN3, LOW);
+        digitalWrite(IN4, HIGH);
+    } else {
+        digitalWrite(IN1, LOW);
+        digitalWrite(IN2, HIGH);
+        digitalWrite(IN3, HIGH);
+        digitalWrite(IN4, LOW);
+    }
+    
+    analogWrite(ENA, 200);
+    analogWrite(ENB, 200);
+
+    unsigned long rotateTime = 0;
+    if (abs(degrees) >= 170) rotateTime = 1600;
+    else if (abs(degrees) >= 80) rotateTime = 800;
+    else rotateTime = (unsigned long)(abs(degrees) * 8.5);
+    
+    delay(rotateTime);
+    stopMotors();
+    delay(500);
+}
+
+void AGVMCU::rotateToDirection(char from, char to) {
+    int angleDiff = 0;
+    if ((from == 'E' && to == 'N') || (from == 'N' && to == 'W') || 
+        (from == 'W' && to == 'S') || (from == 'S' && to == 'E')) {
+        angleDiff = 90;
+    } else if ((from == 'E' && to == 'S') || (from == 'S' && to == 'W') || 
+               (from == 'W' && to == 'N') || (from == 'N' && to == 'E')) {
+        angleDiff = -90;
+    } else if (from != to) {
+        angleDiff = 180;
+    }
+    
+    if (angleDiff != 0) {
+        rotateAngle(angleDiff);
+        currentDir = to;
+    }
+}
+
+void AGVMCU::correctDirectionUsingQRAngle(float qrAngle) {
+    float targetAngle = 0.0;
+    switch(currentDir) {
+        case 'E': targetAngle = 0.0; break;
+        case 'N': targetAngle = 90.0; break;
+        case 'W': targetAngle = 180.0; break;
+        case 'S': targetAngle = -90.0; break;
+    }
+    
+    float angleError = targetAngle - qrAngle;
+    while (angleError > 180) angleError -= 360;
+    while (angleError < -180) angleError += 360;
+    
+    if (abs(angleError) > 5.0) {
+        rotateAngle(angleError);
+    }
+}
+
+void AGVMCU::navigateToNextStep() {
+    if (currentStepIndex >= totalSteps) {
+        Serial.println("GOAL_REACHED");
+        currentState = STATE_GOAL_REACHED;
+        return;
+    }
+
+    Step targetStep = path[currentStepIndex];
+
+    if (currentDir != targetStep.dir) {
+        rotateToDirection(currentDir, targetStep.dir);
+    }
+
+    currentState = STATE_MOVING;
+    
+    // Move one cell (2 seconds)
+    moveForward();
+    delay(2000);
+    stopMotors();
+    
+    if (currentState == STATE_OBSTACLE_AVOIDANCE) {
+        // Waiting for QR in obstacle recovery
+    } else {
+        currentState = STATE_WAITING_QR_CONFIRMATION;
+    }
+}
+
+bool AGVMCU::isAtPosition(int x, int y) {
+    return (currentX == x && currentY == y);
+}
+
+void AGVMCU::parsePath(String raw) {
+    totalSteps = 0;
+    raw.trim();
+    int i = 0;
+    while (i < raw.length() && totalSteps < maxSteps) {
+        if (raw[i] == '(') {
+            int commaIndex = raw.indexOf(',', i);
+            int endIndex = raw.indexOf(')', commaIndex);
+            if (commaIndex == -1 || endIndex == -1) break;
+            int x = raw.substring(i + 1, commaIndex).toInt();
+            int y = raw.substring(commaIndex + 1, endIndex).toInt();
+            char dir = 'E';
+            if (endIndex + 1 < raw.length()) {
+                dir = raw[endIndex + 1];
+            }
+            if (dir == 'N' || dir == 'S' || dir == 'E' || dir == 'W') {
+                path[totalSteps++] = {x, y, dir};
+            }
+            i = endIndex + 2;
+        } else {
+            i++;
+        }
+    }
+}
+
+void AGVMCU::publishCurrentPosition() {
+    Serial.print("CURRENT_POS:");
+    Serial.print(currentX); Serial.print(","); Serial.print(currentY);
+    Serial.print(","); Serial.println(currentDir);
+}
+
+void AGVMCU::publishRerouteCommand(int src_x, int src_y, int dst_x, int dst_y) {
+    Serial.print("REROUTE:SRC:(");
+    Serial.print(src_x); Serial.print(","); Serial.print(src_y);
+    Serial.print("):DST:(");
+    Serial.print(dst_x); Serial.print(","); Serial.print(dst_y);
+    Serial.println("):ONCE");
+}
+
+void AGVMCU::handleAbort() {
+    stopMotors();
+    currentState = STATE_ABORTED;
+    isInObstacleRecovery = false;
+    
+    if (currentX != -1 && currentY != -1) {
+        Serial.print("ABORT: Last position ");
+        Serial.print(currentX); Serial.print(","); Serial.println(currentY);
+    }
+    
+    totalSteps = 0;
+    currentStepIndex = 0;
+}
+
+void AGVMCU::handleStop() {
+    stopMotors();
+    currentState = STATE_STOPPED;
+}
+
+void AGVMCU::handleStart() {
+    if (currentState == STATE_STOPPED || currentState == STATE_ABORTED) {
+        if (totalSteps > 0 && currentX != -1 && currentY != -1) {
+            currentState = STATE_MOVING;
+            navigateToNextStep();
+        }
+    }
+}
+
+void AGVMCU::handleButtons() {
+    unsigned long now = millis();
+
+    if (digitalRead(STOP_BUTTON_PIN) == LOW) {
+        if (now - lastStopPress > 500) {
+            lastStopPress = now;
+            handleStop();
+        }
+    }
+
+    if (digitalRead(START_BUTTON_PIN) == LOW) {
+        if (now - lastStartPress > 500) {
+            lastStartPress = now;
+            handleStart();
+        }
+    }
+
+    if (digitalRead(ABORT_BUTTON_PIN) == LOW) {
+        if (now - lastAbortPress > 500) {
+            lastAbortPress = now;
+            handleAbort();
+        }
+    }
+}
+
+void AGVMCU::handleSerialInput() {
+    if (Serial.available()) {
+        inputBuffer = Serial.readStringUntil('\n');
+        inputBuffer.trim();
+
+        if (inputBuffer == "ABORT") {
+            handleAbort();
+            return;
+        }
+
+        if (inputBuffer == "STOP") {
+            handleStop();
+            return;
+        }
+
+        if (inputBuffer == "START") {
+            handleStart();
+            return;
+        }
+
+        if (inputBuffer.startsWith("DISTANCE:")) {
+            String distanceStr = inputBuffer.substring(9);
+            float currentDistance = distanceStr.toFloat();
+            checkDistanceCondition(currentDistance);
+            return;
+        }
+
+        if (inputBuffer.startsWith("(")) {
+            parsePath(inputBuffer);
+            if (totalSteps > 0) {
+                currentStepIndex = 0;
+                isInObstacleRecovery = false;
+
+                if (currentX == -1 || currentY == -1) {
+                    currentState = STATE_WAITING_FOR_QR;
+                } else {
+                    currentState = STATE_MOVING;
+                    navigateToNextStep();
+                }
+            }
+            return;
+        }
+
+        if (inputBuffer.startsWith("QR:")) {
+            String coordData = inputBuffer.substring(3);
+            int firstComma = coordData.indexOf(',');
+            int secondComma = coordData.indexOf(',', firstComma + 1);
+            
+            if (secondComma != -1) {
+                int qrX = coordData.substring(0, firstComma).toInt();
+                int qrY = coordData.substring(firstComma + 1, secondComma).toInt();
+                float qrAngle = coordData.substring(secondComma + 1).toFloat();
+
+                currentX = qrX;
+                currentY = qrY;
+
+                correctDirectionUsingQRAngle(qrAngle);
+
+                switch(currentState) {
+                    case STATE_WAITING_FOR_QR:
+                        currentState = STATE_MOVING;
+                        navigateToNextStep();
+                        break;
+                        
+                    case STATE_WAITING_QR_CONFIRMATION:
+                        Step targetStep = path[currentStepIndex];
+                        if (isAtPosition(targetStep.x, targetStep.y)) {
+                            currentStepIndex++;
+                            publishCurrentPosition();
+                            
+                            if (currentStepIndex >= totalSteps) {
+                                currentState = STATE_GOAL_REACHED;
+                            } else {
+                                currentState = STATE_MOVING;
+                                navigateToNextStep();
+                            }
+                        } else {
+                            Serial.println("NAV_FAILED: Wrong QR position");
+                            currentState = STATE_STOPPED;
+                        }
+                        break;
+                        
+                    case STATE_OBSTACLE_AVOIDANCE:
+                        if (originalDestinationX != -1 && originalDestinationY != -1) {
+                            publishRerouteCommand(currentX, currentY, originalDestinationX, originalDestinationY);
+                        }
+                        currentState = STATE_IDLE;
+                        isInObstacleRecovery = false;
+                        break;
+                }
+            }
+            return;
+        }
+    }
+}
+
+void AGVMCU::checkDistanceCondition(float currentDistance) {
+    unsigned long currentTime = millis();
+    
+    if (currentDistance < distanceThreshold) {
+        if (!distanceBelowThreshold) {
+            distanceBelowThreshold = true;
+            distanceBelowThresholdStart = currentTime;
+            
+            if (currentState == STATE_MOVING) {
+                stopMotors();
+                Serial.println("OBSTACLE: Emergency stop");
+            }
+        } 
+        else if (currentTime - distanceBelowThresholdStart >= distanceTimeoutMs) {
+            handleObstacleTimeout();
+        }
+    } 
+    else if (distanceBelowThreshold) {
+        distanceBelowThreshold = false;
+    }
+}
+
+void AGVMCU::handleObstacleTimeout() {
+    Serial.println("OBSTACLE: Permanent obstacle detected");
+    
+    if (currentX != -1 && currentY != -1) {
+        lastSafeX = currentX;
+        lastSafeY = currentY;
+        lastSafeDir = currentDir;
+    }
+    
+    if (currentStepIndex < totalSteps) {
+        blockedTargetX = path[currentStepIndex].x;
+        blockedTargetY = path[currentStepIndex].y;
+        
+        if (totalSteps > 0) {
+            originalDestinationX = path[totalSteps - 1].x;
+            originalDestinationY = path[totalSteps - 1].y;
+        }
+    }
+    
+    startObstacleRecovery();
+}
+
+void AGVMCU::startObstacleRecovery() {
+    currentState = STATE_OBSTACLE_AVOIDANCE;
+    isInObstacleRecovery = true;
+    
+    rotateAngle(180);
+    
+    switch(currentDir) {
+        case 'E': currentDir = 'W'; break;
+        case 'W': currentDir = 'E'; break;
+        case 'N': currentDir = 'S'; break;
+        case 'S': currentDir = 'N'; break;
+    }
+    
+    // Move back one cell
+    moveBackward();
+    delay(2000);
+    stopMotors();
+    
+    if (currentX != -1 && currentY != -1 && originalDestinationX != -1 && originalDestinationY != -1) {
+        publishRerouteCommand(currentX, currentY, originalDestinationX, originalDestinationY);
+    }
+}
