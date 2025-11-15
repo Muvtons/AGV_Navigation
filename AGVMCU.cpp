@@ -1,7 +1,7 @@
 #include "AGVMCU.h"
 
-// Global instance
-AGVMCU agv;
+// Global instance with your preferred name
+AGVMCU agvmcu;
 
 AGVMCU::AGVMCU() 
     : distanceThreshold(10.0), distanceTimeoutMs(10000), 
