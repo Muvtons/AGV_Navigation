@@ -1,0 +1,10 @@
+name=AGVMCU
+version=1.0.0
+author=Your Name
+maintainer=Your Email
+sentence=Complete AGV Navigation System - Just Include and Run
+paragraph=Autonomous AGV navigation with QR verification, obstacle avoidance, and ROS2 integration - works automatically when included
+category=Device Control
+url=https://github.com/yourusername/agvmcu
+architectures=esp32,esp8266
+includes=AGVMCU.h
