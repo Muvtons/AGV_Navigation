@@ -98,7 +98,7 @@ public:
     void update();
 };
 
-// Global instance for automatic operation
-extern AGVMCU agv;
+// Global instance with your preferred name
+extern AGVMCU agvmcu;
 
 #endif
