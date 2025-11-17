@@ -127,7 +127,7 @@ void AGVMCU::processCommand(const char* cmd) {
                     currentState = STATE_GOAL_REACHED;
                 } else {
                     // Ready to continue from this step
-                    currentState = STATE_WAITING_QR;
+                    currentState = STATE_WAITING_FOR_QR;  // FIXED: Changed from STATE_WAITING_QR
                     Serial.println("✅ Ready to continue navigation from current step");
                 }
             } else {
@@ -137,7 +137,7 @@ void AGVMCU::processCommand(const char* cmd) {
                 currentX = path[0].x;
                 currentY = path[0].y;
                 currentDir = path[0].dir;
-                currentState = STATE_WAITING_QR;
+                currentState = STATE_WAITING_FOR_QR;  // FIXED: Changed from STATE_WAITING_QR
                 Serial.println("📍 Reset to first step position, awaiting QR...");
             }
         } else {
@@ -316,7 +316,7 @@ void AGVMCU::rotateToDirection(char from, char to) {
     if (angleDiff != 0) {
         Serial.print("🔄 CHANGING DIRECTION: ");
         Serial.print(from); Serial.print(" -> "); Serial.print(to);
-        Serial.print(" ("); Serial.print(angleDiff); Serial.println("°)");
+        Serial.print(" ("); Serial.print(angleDiff); Serial.println("°");
         
         rotateAngle(angleDiff);
         currentDir = to;
