@@ -20,7 +20,7 @@
 #define maxSteps 50      // Maximum waypoints in path
 
 // ============================================================================
-// STATE MACHINE - UPDATED FOR QR-VERIFIED NAVIGATION
+// STATE MACHINE - QR-VERIFIED NAVIGATION
 // ============================================================================
 enum AGVState {
     STATE_IDLE,                 // No path loaded, system idle
@@ -34,7 +34,7 @@ enum AGVState {
 };
 
 // ============================================================================
-// PATH STEP STRUCTURE - NOW INCLUDES DISTANCE
+// PATH STEP STRUCTURE - WITH DISTANCE
 // ============================================================================
 struct Step {
     int x;           // Grid X coordinate
@@ -63,9 +63,7 @@ private:
     
     // Current and expected positions
     int currentX, currentY;     // Ground truth from QR
-    int expectedX, expectedY;   // Expected from path
     char currentDir;            // Current facing direction
-    char expectedDir;           // Expected direction from path
     AGVState currentState;      // Main state machine state
     
     // =========================================================================
