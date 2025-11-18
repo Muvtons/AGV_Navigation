@@ -17,8 +17,10 @@ AGVMCU::AGVMCU()
       isRotating(false), targetRotationTime(0), qrWaitStartTime(0) {
 }
 
-void AGVMCU::begin(long baudRate) {
-    Serial.begin(baudRate);
+void AGVMCU::begin(long baudRate, bool initSerial) {
+    if (initSerial) {
+        Serial.begin(baudRate);
+    }
     
     pinMode(ENA, OUTPUT);
     pinMode(IN1, OUTPUT);
