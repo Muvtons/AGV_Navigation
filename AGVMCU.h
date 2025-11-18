@@ -3,103 +3,123 @@
 
 #include <Arduino.h>
 
-// Pin definitions
-#define ENA 10
-#define IN1 3
-#define IN2 4
-#define ENB 11
-#define IN3 5
-#define IN4 6
+// Motor pins
+#define ENA 16
+#define IN1 17
+#define IN2 18
+#define ENB 19
+#define IN3 20
+#define IN4 21
 
-#define START_BUTTON_PIN 7
-#define STOP_BUTTON_PIN 8
-#define ABORT_BUTTON_PIN 9
+// Button pins
+#define START_BUTTON_PIN 4
+#define STOP_BUTTON_PIN 5
+#define ABORT_BUTTON_PIN 6
 
-// Navigation states
-enum State { 
-    STATE_IDLE, 
-    STATE_WAITING_FOR_QR, 
-    STATE_MOVING, 
-    STATE_WAITING_QR_CONFIRMATION, 
-    STATE_GOAL_REACHED,
-    STATE_ABORTED,
+// Navigation constants
+#define maxSteps 50
+
+// System states
+enum AGVState {
+    STATE_IDLE,
+    STATE_WAITING_FOR_QR,
+    STATE_MOVING,
+    STATE_WAITING_QR_CONFIRMATION,
     STATE_STOPPED,
+    STATE_ABORTED,
+    STATE_GOAL_REACHED,
     STATE_OBSTACLE_AVOIDANCE
 };
 
-// Step structure
+// Path step structure
 struct Step {
     int x;
     int y;
-    char dir;
+    char dir; // 'N', 'S', 'E', 'W'
 };
 
 class AGVMCU {
-private:
-    // Navigation variables
-    State currentState;
-    String inputBuffer;
-    String lastPositionInput;
-    char currentDir;
-    int currentX, currentY;
-    int lastSafeX, lastSafeY;
-    char lastSafeDir;
+public:
+    AGVMCU();
     
-    // Path variables
-    static const int maxSteps = 20;
+    void begin(long baudRate = 115200);
+    void update();
+    void processCommand(const char* cmd);
+
+private:
+    // Navigation state
     Step path[maxSteps];
     int totalSteps;
     int currentStepIndex;
-    
-    // Obstacle detection
-    float distanceThreshold;
-    unsigned long distanceBelowThresholdStart;
-    const unsigned long distanceTimeoutMs;
-    bool distanceBelowThreshold;
+    int currentX;
+    int currentY;
+    char currentDir;
+    AGVState currentState;
     
     // Obstacle recovery
-    int blockedTargetX, blockedTargetY;
-    int originalDestinationX, originalDestinationY;
+    int lastSafeX;
+    int lastSafeY;
+    char lastSafeDir;
+    int blockedTargetX;
+    int blockedTargetY;
+    int originalDestinationX;
+    int originalDestinationY;
     bool isInObstacleRecovery;
     
-    // Button debounce
-    unsigned long lastAbortPress, lastStartPress, lastStopPress;
+    // Distance sensor
+    float distanceThreshold;
+    unsigned long distanceTimeoutMs;
+    bool distanceBelowThreshold;
+    unsigned long distanceBelowThresholdStart;
     
-    // Motor control functions
-    void moveForward();
-    void moveBackward();
+    // Button debouncing
+    unsigned long lastAbortPress;
+    unsigned long lastStartPress;
+    unsigned long lastStopPress;
+    
+    // Non-blocking movement
+    unsigned long moveStartTime;
+    bool isMoving;
+    unsigned long rotateStartTime;
+    bool isRotating;
+    unsigned long targetRotationTime;
+    unsigned long qrWaitStartTime;
+    
+    // Command buffer
+    String inputBuffer;
+    
+    // Navigation functions
+    void navigateToNextStep();
+    void parsePath(String raw);
+    bool isAtPosition(int x, int y);
+    void updatePositionAfterMove();
+    void updateMovementStateMachine();
+    
+    // Motor control
+    void startMoveForward();
+    void startMoveBackward();
+    void moveBackward(); // Blocking version for recovery
     void stopMotors();
     void rotateAngle(float degrees);
     void rotateToDirection(char from, char to);
     void correctDirectionUsingQRAngle(float qrAngle);
     
-    // Navigation functions
-    void navigateToNextStep();
-    bool isAtPosition(int x, int y);
-    void parsePath(String raw);
-    
-    // Communication functions
-    void publishCurrentPosition();
-    void publishRerouteCommand(int src_x, int src_y, int dst_x, int dst_y);
-    
-    // State handling functions
+    // Command handlers
     void handleAbort();
     void handleStop();
     void handleStart();
     void handleButtons();
-    void handleSerialInput();
+    
+    // Distance sensor
     void checkDistanceCondition(float currentDistance);
     void handleObstacleTimeout();
     void startObstacleRecovery();
     
-public:
-    AGVMCU();
-    void begin(long baudRate = 115200);
-    void update();
-    void processCommand(const char* command);  // ✅ ADD THIS EXACT LINE
+    // Communication
+    void publishCurrentPosition();
+    void publishRerouteCommand(int src_x, int src_y, int dst_x, int dst_y);
 };
 
-// Global instance with your preferred name
 extern AGVMCU agvmcu;
 
-#endif
+#endif // AGVMCU_H
