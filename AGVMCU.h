@@ -42,7 +42,8 @@ class AGVMCU {
 public:
     AGVMCU();
     
-    void begin(long baudRate = 115200);
+    // ✅ UPDATED: Added initSerial parameter
+    void begin(long baudRate = 115200, bool initSerial = true);
     void update();
     void processCommand(const char* cmd);
 
