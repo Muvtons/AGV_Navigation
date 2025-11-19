@@ -2,10 +2,6 @@
 #define AGVMCU_H
 
 #include <Arduino.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
-#include <freertos/queue.h>
-#include <freertos/semphr.h>
 
 // Motor control pins for L298N
 #define ENA 12
@@ -39,20 +35,6 @@ struct Step {
     char dir;
 };
 
-// Message types for inter-core communication
-enum MessageType {
-    MSG_PATH,
-    MSG_QR,
-    MSG_DISTANCE,
-    MSG_COMMAND,
-    MSG_BUTTON
-};
-
-struct Message {
-    MessageType type;
-    String data;
-};
-
 class AGVMCU {
 private:
     // Motor control
@@ -68,16 +50,9 @@ private:
     bool isAtPosition(int x, int y);
     void parsePath(String raw);
     
-    // Core 0 functions
-    static void core0Task(void* parameter);
-    void handleCore0();
+    // Input handlers
     void handleSerialInput();
     void handleButtons();
-    
-    // Core 1 functions  
-    static void core1Task(void* parameter);
-    void handleCore1();
-    void processMessage(Message msg);
     
     // Command handlers
     void handleAbort();
@@ -87,7 +62,6 @@ private:
     
     // Utility
     void publishCurrentPosition();
-    void publishRerouteCommand(int src_x, int src_y, int dst_x, int dst_y);
     
     // Navigation variables
     Step path[50];
@@ -105,13 +79,13 @@ private:
     // Button debouncing
     unsigned long lastAbortPress, lastStartPress, lastStopPress;
     
-    // Shared data protection
-    SemaphoreHandle_t xMutex;
-    QueueHandle_t xQueue;
+    // Input buffer
+    String inputBuffer;
 
 public:
     AGVMCU();
     void begin(long baudRate = 115200);
+    void run(); // Main loop function to be called continuously
 };
 
 // Global instance
