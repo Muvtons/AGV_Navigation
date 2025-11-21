@@ -46,7 +46,7 @@
 
 // Buttons (Moved to high numbers usually safe on DevKits)
 // If your board lacks these pins, use 11, 12, 13
-#define START_BTN 12 // Changed from 33 (PSRAM conflict)
+#define START_BTN 1 // Changed from 33 (PSRAM conflict)
 #define STOP_BTN  13 // Changed from 32 (PSRAM conflict)
 #define ABORT_BTN 14 // Changed from 35 (PSRAM conflict)
 
